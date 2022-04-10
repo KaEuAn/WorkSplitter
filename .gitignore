@@ -2,3 +2,5 @@
 *cache*
 *.docx
 *.pdf
+temp/*
+*.json
