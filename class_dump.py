@@ -5,5 +5,5 @@ def class_dump(clsDict, output_filename="cls_files.json"):
         json.dump(clsDict, fr)
 
 if __name__ == "__main__":
-    clsDict = {"5": "11.docx"}
+    clsDict = {"5": ["11.pdf"]}
     class_dump(clsDict)
