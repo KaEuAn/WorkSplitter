@@ -85,8 +85,9 @@ class PdfHeaderChanger:
         QRfilename = self.QRMaker.make(self.page_count)
         filename = 'temp/pdf2merge{}_{}.pdf'.format(self.docs_count, self.page_count)
         newPdf = canvas.Canvas(filename)
+        newPdf.setFont("Times-Roman", 12)
         newPdf.drawImage(QRfilename, 490, 740)
-        newPdf.drawString(65, 810,"{}".format(self.workID))
+        newPdf.drawString(50, 816,"ID: {}".format(self.workID))
         newPdf.save()
         return filename
 
@@ -94,8 +95,9 @@ class PdfHeaderChanger:
         QRfilename = self.QRMaker.make(self.page_count)
         filename = 'temp/title2merge{}_{}.pdf'.format(self.docs_count, self.page_count)
         newPdf = canvas.Canvas(filename)
+        newPdf.setFont("Times-Roman", 12)
         newPdf.drawImage(QRfilename, 500, 750)
-        newPdf.drawString(15, 720,"{}".format(self.workID))
+        newPdf.drawString(15, 720,"ID: {}".format(self.workID))
         newPdf.drawString(350, 720,"{}".format(cls))
         newPdf.save()
         return filename
@@ -198,7 +200,7 @@ if __name__ == "__main__":
     pdf_ch.add_work("8")
     pdf_ch.add_work("9")
     pdf_ch.finish()
-    scanner = QRCodeScanner()
+    '''scanner = QRCodeScanner()
     scanner.scanPdf("output/to_print1.pdf")
     scanner.collectWorks()
-    scanner.printWorks()
+    scanner.printWorks()'''
