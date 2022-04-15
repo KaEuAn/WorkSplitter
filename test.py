@@ -1,6 +1,7 @@
 from main import QRCodeMaker
 from PIL import ImageChops
 import unittest
+from wand.image import Image
 
 class TestFunctionality(unittest.TestCase):
 
@@ -20,9 +21,13 @@ class TestFunctionality(unittest.TestCase):
         self.assertNotEqualImages(img3, img2)
         self.assertNotEqualImages(img1, img3)
 
- 
-        
-
 
 if __name__ == '__main__':
-    unittest.main()
+    #unittest.main()
+    fname = "output/1.pdf"
+    with(Image(filename=fname, resolution=120)) as source: 
+        for i, image in enumerate(source.sequence):
+            newfilename = fname[:-4] + str(i + 1) + '.jpeg'
+            print(help(image))
+            #Image(image).save(filename=newfilename)
+            break
