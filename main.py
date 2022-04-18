@@ -7,6 +7,7 @@ from reportlab.pdfgen import canvas
 from PyPDF2 import PdfFileReader, PdfFileWriter
 import os, docx, json
 from docx.shared import Cm
+import shutil
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 def fullname_convert(name):
@@ -21,7 +22,7 @@ class QRCodeMaker:
         self.tempFilenameTemplate = "temp/QRcode{}_{}.png"
 
     def make(self, page):
-        self._QRCode.add_data("ID:{}:class:{}:page:{}".format(self.ID, self.cls, page))
+        self._QRCode.add_data("{}:{}:{}".format(self.ID, self.cls, page))
         self._QRCodeImage = self._QRCode.make_image()
         self._QRCode.clear()
         self._QRCodeImage = self._QRCodeImage.resize(self.size)
@@ -58,22 +59,27 @@ class WordHeaderChanger:
 
 
 class PdfHeaderChanger:
-    def __init__(self, desc_filename, output_filename="output/to_print{}.pdf", max_count=100, startingID=1):
-        self.docs_count = 0
+    def __init__(self, desc_filename, output_path="output", max_count=100, startingDocsId=1, startingStudentId=1, double_sided_print=True):
+        self.docs_count = startingDocsId - 1
         self.page_count = 0
-        self.workID = startingID
+        self.workID = startingStudentId
         self.max_count = max_count
-        self.output_filename = output_filename
+        self.output_filename = '{}/to_print'.format(output_path) + '{}.pdf'
         self.outputPdf = None
         self.QRMaker = QRCodeMaker()
+        self.ds_print = double_sided_print
         with open(desc_filename, 'r') as desc_file:
             self.docsByCls = json.load(desc_file)
         self.newOutputDocument()
+        
+        if not os.path.isdir('temp'):
+            os.mkdir('temp')
 
     def newOutputDocument(self):
         if self.outputPdf:
-            with open(self.output_filename.format(self.docs_count), "wb") as out:
-                self.outputPdf.write(out)
+            if self.outputPdf.getNumPages() > 0:
+                with open(self.output_filename.format(self.docs_count), "wb") as out:
+                    self.outputPdf.write(out)
             for file in self.toClose:
                 file.close()
         self.toClose = []
@@ -92,37 +98,53 @@ class PdfHeaderChanger:
         return filename
 
     def make_title2merge(self, cls):
-        QRfilename = self.QRMaker.make(self.page_count)
         filename = 'temp/title2merge{}_{}.pdf'.format(self.docs_count, self.page_count)
         newPdf = canvas.Canvas(filename)
         newPdf.setFont("Times-Roman", 12)
-        newPdf.drawImage(QRfilename, 500, 750)
-        newPdf.drawString(15, 720,"ID: {}".format(self.workID))
-        newPdf.drawString(350, 720,"{}".format(cls))
+        newPdf.drawString(206, 743,"{}".format(self.workID))
+        newPdf.drawString(321, 624,"{}".format(cls))
+        newPdf.drawString(206, 261,"{}".format(self.workID))
+        newPdf.drawString(321, 142,"{}".format(cls))
         newPdf.save()
         return filename
+
+    def openPdfReader(self, filename):
+        stream = open(filename, 'rb')
+        self.toClose.append(stream)
+        return PdfFileReader(stream)
+
+    def mergeAddPages(self, pdfs, pages):
+        curPage = pdfs[0].getPage(pages[0])
+        for i in range(1, len(pdfs)):
+            curPage.mergePage(pdfs[i].getPage(pages[i]))
+        self.outputPdf.addPage(curPage)
+
 
     def add_work(self, cls):
         self.QRMaker.cls = cls
         self.QRMaker.ID = self.workID
+
+        title_filename = self.make_title2merge(cls)
+        titleText = self.openPdfReader(title_filename)
+        titlePdf = self.openPdfReader(self.docsByCls['title'])
+
+        self.mergeAddPages((titlePdf, titleText), (0, 0))
+        self.outputPdf.addBlankPage()
+
         for cls_filename in self.docsByCls[cls]:
             
-            task_stream = open(cls_filename, 'rb')
-            taskPdf = PdfFileReader(task_stream)
-            self.toClose.append(task_stream)
+            taskPdf = self.openPdfReader(cls_filename)
 
             page_count = taskPdf.getNumPages()
             for page_num in range(page_count):
                 #make QRCode
                 pdf2merge_filename = self.make_pdf2merge()
-                qrcode_stream = open(pdf2merge_filename, 'rb')
-                qrcodePdf = PdfFileReader(qrcode_stream)
-                self.toClose.append(qrcode_stream)
+                qrcodePdf = self.openPdfReader(pdf2merge_filename)
                 # merge current page
-                curPage = taskPdf.getPage(page_num)
-                curPage.mergePage(qrcodePdf.getPage(0))
-                self.outputPdf.addPage(curPage)
+                self.mergeAddPages((taskPdf, qrcodePdf), (page_num, 0))
                 self.page_count += 1
+            if self.ds_print and page_count % 2 == 1:
+                self.outputPdf.addBlankPage()
 
         self.workID += 1
         if self.page_count > self.max_count:
@@ -130,6 +152,12 @@ class PdfHeaderChanger:
     
     def finish(self):
         self.newOutputDocument()
+        
+        if os.path.isdir('temp'):
+            try:
+                shutil.rmtree('temp')
+            except OSError as e:
+                print("Error: %s - %s." % (e.filename, e.strerror))
 
 
 class QRCodeScanner:
@@ -152,11 +180,11 @@ class QRCodeScanner:
             qr_string, points, straight_qrcode = self._detector.detectAndDecode(image)
             print(qr_string)
             if not qr_string:
+                print("bad parse")
                 return False
-            parsed_string = qr_string.split(":")
-            ID, cls, page = parsed_string[1], parsed_string[3], parsed_string[5]
+            student_id, cls, page = qr_string.split(":")
             #first index is index of page to print, last one is index of page on current pdf
-            self._works_dict[ID].append((page, cls, pdf_filename, i))
+            self._works_dict[student_id].append((page, cls, pdf_filename, i))
         return True
         
     def scanPdf(self, pdf_filename):
@@ -196,11 +224,11 @@ class QRCodeScanner:
 if __name__ == "__main__":
     pdf_ch = PdfHeaderChanger("cls_files.json")
     pdf_ch.add_work("5")
-    pdf_ch.add_work("7")
+    pdf_ch.finish()
+    '''pdf_ch.add_work("7")
     pdf_ch.add_work("8")
     pdf_ch.add_work("9")
-    pdf_ch.finish()
-    '''scanner = QRCodeScanner()
+    scanner = QRCodeScanner()
     scanner.scanPdf("output/to_print1.pdf")
     scanner.collectWorks()
     scanner.printWorks()'''
