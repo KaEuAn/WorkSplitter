@@ -184,6 +184,11 @@ class PdfHeaderChanger:
                 print("Error: %s - %s." % (e.filename, e.strerror))
 
 
+def cropNoiseRemove(wImage):
+    w, h = wImage.size
+    wImage.crop(w * 4 // 5, 0, w, h * 1 // 5)
+    wImage.statistic('mean', width=5, height=7)
+
 class QRCodeScanner:
 
     def __init__(self, output_folder, load=None, save=None):
@@ -192,71 +197,89 @@ class QRCodeScanner:
         if load:
             self.loadLogs(load)
         else:
-            self._works_dict = defaultdict(list)
-            self._black_list = []
             self._visited = set()
         self._image_type = 'png'
-        self._output_filename = os.path.join(output_folder, "{}.pdf")
+        self._output_path = output_folder
+        self._inter_output_path = "onelistpdfs"
+        
+        if not os.path.isdir(self._inter_output_path):
+            os.mkdir(self._inter_output_path)
 
+        if not os.path.isdir('blacklist'):
+            os.mkdir('blacklist')
         
         if not os.path.isdir('temp'):
             os.mkdir('temp')
 
-    def tryParse(self, source, pdf_filename):
+    def tryParse(self, source, pdf_filename, pdfReader):
+        if pdf_filename in self._visited:
+            return
         for i, image in enumerate(source.sequence):
             image_filename = 'temp/scan{}.jpeg'.format(i)
-            wImage = wandImage(image)
-            w, h = wImage.size
-            wImage.crop(w * 4 // 5, 0, w, h * 1 // 5)
-            wImage.statistic('mean', width=5, height=7)
-            wImage.save(filename=image_filename)
-            image = cv.imread(image_filename)
-            qr_string, points, straight_qrcode = self._detector.detectAndDecode(image)
-            print(qr_string)
-            if not qr_string:
-                print("bad parse")
-                self._black_list.append((pdf_filename, i))
-                continue
-            student_id, cls, page = qr_string.split(":")
-            #first index is index of page to print, last one is index of page on current pdf
-            self._works_dict[student_id].append((page, cls, pdf_filename, i))
-        return True
+            with wandImage(image) as wImage:
+                cropNoiseRemove(wImage)
+                wImage.save(filename=image_filename)
+                qr_string, points, straight_qrcode = self._detector.detectAndDecode(cv.imread(image_filename))
+                print(qr_string)
+                if qr_string:
+                    id, cls, page = qr_string.split(":")
+                    idpath = os.path.join(self._inter_output_path, id)
+                    if not os.path.isdir(idpath):
+                        os.mkdir(idpath)
+                    out_file = os.path.join(idpath, "{}_{}_{}.pdf".format(id, cls, page))
+                else:
+                    print("can't find QRcode")
+                    out_file = os.path.join("blacklist", "page_{}_{}".format(i, os.path.basename(pdf_filename)))
+                pdfWriter = PdfFileWriter()
+                with open(out_file, 'wb') as out:
+                    pdfWriter.addPage(pdfReader.getPage(i))
+                    pdfWriter.write(out)
+        self._visited.add(pdf_filename)
         
     def scanPdf(self, pdf_filename):
         for resolution in [300]:
-            with(wandImage(filename=pdf_filename, resolution=resolution)) as source: 
-                self.tryParse(source, pdf_filename)
+            with (wandImage(filename=pdf_filename, resolution=resolution)) as source, open(pdf_filename, 'rb') as pdfStream:
+                pdfReader = PdfFileReader(pdfStream)
+                self.tryParse(source, pdf_filename, pdfReader)
 
     
     def collectWorks(self):
-        for id in self._works_dict:
-            self._works_dict[id].sort()
+        for path in os.listdir(self._inter_output_path):
+            dir = os.path.join(self._inter_output_path, path)
+            if os.path.isdir(dir):
+                self.collectWorksFromPath(dir)
         if self.save_filename:
             self.saveLogs()
 
-    def printWorks(self):
-        for ID, list_parameters in self._works_dict.items():
-            outputPdf = PdfFileWriter()
-            listToClose = []
-            for page, cls, pdf_filename, pdf_page in list_parameters:
-                input_stream = open(pdf_filename, 'rb')
-                inputPdf = PdfFileReader(input_stream)
-                listToClose.append(input_stream)
-                outputPdf.addPage(inputPdf.getPage(pdf_page))
-            with open(self._output_filename.format(ID), 'wb') as output_steam:
-                outputPdf.write(output_steam)
-            for file in listToClose:
-                file.close()
+    def collectWorksFromPath(self, dir):
+        pdfWriter = PdfFileWriter()
+        toClose = []
+        for path in os.listdir(dir):
+            file = os.path.join(dir, path)
+            if os.path.isfile(file):
+                file = open(file, 'rb')
+                id, cls, page = path.split('_')
+                toClose.append((page, id, cls, file))
+        toClose.sort()
+        for page, id, cls, file in toClose:
+            pdfReader = PdfFileReader(file)
+            pdfWriter.addPage(pdfReader.getPage(0))
+        with open(os.path.join(self._output_path, "{}cls_{}id.pdf".format(cls, id)), 'wb') as out:
+            pdfWriter.write(out)
+        for page, id, cls, file in toClose:
+            file.close()
+
+    def checkBlacklist(self):
+        pass
+        
 
     def saveLogs(self):
         with open(self.save_filename, "w") as fw:
-            json.dump({"black_list.json": self._black_list, "works_dict": self._works_dict, "visited": self._visited}, fw)
+            json.dump({"visited": self._visited}, fw)
 
     def loadLogs(self, filename):
         with open(filename, "w") as fw:
             json_dict = json.load(fw)
-            self._works_dict = defaultdict(list, json_dict["works_dict"])
-            self._black_list = json_dict["black_list.json"]
             self._visited = json_dict["visited"]
     
         
