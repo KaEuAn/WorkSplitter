@@ -2,6 +2,7 @@ import qrcode
 from PIL import Image
 import cv2 as cv
 from wand.image import Image as wandImage
+from wand.display import display
 from collections import defaultdict
 from reportlab.pdfgen import canvas
 from PyPDF2 import PdfFileReader, PdfFileWriter
@@ -9,6 +10,7 @@ import os, docx, json
 from docx.shared import Cm
 import shutil
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from pympler.tracker import SummaryTracker
 
 def fullname_convert(name):
     return name.replace(' ', '_')
@@ -184,10 +186,6 @@ class PdfHeaderChanger:
                 print("Error: %s - %s." % (e.filename, e.strerror))
 
 
-def cropNoiseRemove(wImage):
-    w, h = wImage.size
-    wImage.crop(w * 4 // 5, 0, w, h * 1 // 5)
-    wImage.statistic('mean', width=5, height=7)
 
 class QRCodeScanner:
 
@@ -201,6 +199,9 @@ class QRCodeScanner:
         self._image_type = 'png'
         self._output_path = output_folder
         self._inter_output_path = "onelistpdfs"
+        self.fileCount = defaultdict(int, {"5": 18, "7": 17, "8": 23, "9": 23})
+        
+        self.memoryTracker = SummaryTracker()
         
         if not os.path.isdir(self._inter_output_path):
             os.mkdir(self._inter_output_path)
@@ -211,39 +212,92 @@ class QRCodeScanner:
         if not os.path.isdir('temp'):
             os.mkdir('temp')
 
-    def tryParse(self, source, pdf_filename, pdfReader):
+    def __del__(self):
+        if os.path.isdir('temp'):
+            try:
+                shutil.rmtree('temp')
+            except OSError as e:
+                print("Error: %s - %s." % (e.filename, e.strerror))
+
+    
+    def cropNoiseRemove(self, wImage):
+        w, h = wImage.size
+        wImage.crop(int(w * 0.8), int(h * 0.00), int(w * 1), int(h * 0.18))
+        wImage.statistic('mean', width=5, height=7)
+
+    def rotateCropNoiseRemove(self, wImage):
+        wImage.rotate(180)
+        w, h = wImage.size
+        wImage.crop(int(w * 0.8), int(h * 0.00), int(w * 1), int(h * 0.18))
+        wImage.statistic('mean', width=5, height=7)
+
+    def extractQrCode(self, image, image_filename, preprocessFunc):
+        with wandImage(image) as wImage:
+            preprocessFunc(wImage)
+            wImage.save(filename=image_filename)
+            qr_string, points, straight_qrcode = self._detector.detectAndDecode(cv.imread(image_filename))
+        return qr_string
+
+    def printToFile(self, out_file, page, rotated):
+        pdfWriter = PdfFileWriter()
+        with open(out_file, 'wb') as out:
+            if rotated:
+                page.rotateClockwise(180)
+            pdfWriter.addPage(page)
+            pdfWriter.write(out)
+
+    def makeFilename(self, id, cls, page):
+        idpath = os.path.join(self._inter_output_path, id)
+        if not os.path.isdir(idpath):
+            os.mkdir(idpath)
+        return os.path.join(idpath, "{}_{}_{}.pdf".format(id, cls, page))
+
+    def tryParse(self, source, pdf_filename, pdfReader, try_rotate=False, bad_processing=False):
         if pdf_filename in self._visited:
             return
         for i, image in enumerate(source.sequence):
-            image_filename = 'temp/scan{}.jpeg'.format(i)
-            with wandImage(image) as wImage:
-                cropNoiseRemove(wImage)
-                wImage.save(filename=image_filename)
-                qr_string, points, straight_qrcode = self._detector.detectAndDecode(cv.imread(image_filename))
+            if bad_processing:
+                with wandImage(image) as img:
+                    img.save(filename='temp/show_image.jpg')
+                    while True:
+                        try:
+                            display(img)
+                            input_string = input("type 'bad' for empty doc, else 'id:cls:page:rotated'").strip()
+                            if input_string != 'bad':
+                                id, cls, page, rotated = input_string.split(":")
+                                rotated = bool(rotated)
+                                out_file = self.makeFilename(id, cls, page)
+                                self.printToFile(out_file, pdfReader.getPage(i), rotated)
+                            break
+                        except ValueError:
+                            continue
+                continue
+            image_filename = 'temp/scan{}_{}.jpeg'.format(i, hash(os.path.basename(pdf_filename)))
+            qr_string = self.extractQrCode(image, image_filename, self.cropNoiseRemove)
+            rotated = False
+            if not qr_string and try_rotate:
+                qr_string = self.extractQrCode(image, image_filename, self.rotateCropNoiseRemove)
+                rotated = True
+            if qr_string:
                 print(qr_string)
-                if qr_string:
-                    id, cls, page = qr_string.split(":")
-                    idpath = os.path.join(self._inter_output_path, id)
-                    if not os.path.isdir(idpath):
-                        os.mkdir(idpath)
-                    out_file = os.path.join(idpath, "{}_{}_{}.pdf".format(id, cls, page))
-                else:
-                    print("can't find QRcode")
-                    out_file = os.path.join("blacklist", "page_{}_{}".format(i, os.path.basename(pdf_filename)))
-                pdfWriter = PdfFileWriter()
-                with open(out_file, 'wb') as out:
-                    pdfWriter.addPage(pdfReader.getPage(i))
-                    pdfWriter.write(out)
+                id, cls, page = qr_string.split(":")
+                out_file = self.makeFilename(id, cls, page)
+            if not qr_string:
+                print("can't find QRcode in file {}".format(pdf_filename))
+                out_file = os.path.join("blacklist", "page_{}_{}".format(i, os.path.basename(pdf_filename)))
+            self.printToFile(out_file, pdfReader.getPage(i), rotated)
+            
         self._visited.add(pdf_filename)
         
-    def scanPdf(self, pdf_filename):
-        for resolution in [300]:
-            with (wandImage(filename=pdf_filename, resolution=resolution)) as source, open(pdf_filename, 'rb') as pdfStream:
-                pdfReader = PdfFileReader(pdfStream)
-                self.tryParse(source, pdf_filename, pdfReader)
+    def scanPdf(self, pdf_filename, resolution=300, **kwargs):
+        self.memoryTracker.print_diff()
+        with (wandImage(filename=pdf_filename, resolution=resolution)) as source, open(pdf_filename, 'rb') as pdfStream:
+            pdfReader = PdfFileReader(pdfStream)
+            self.tryParse(source, pdf_filename, pdfReader, **kwargs)
 
     
     def collectWorks(self):
+        print('collecting works')
         for path in os.listdir(self._inter_output_path):
             dir = os.path.join(self._inter_output_path, path)
             if os.path.isdir(dir):
@@ -254,13 +308,17 @@ class QRCodeScanner:
     def collectWorksFromPath(self, dir):
         pdfWriter = PdfFileWriter()
         toClose = []
+        counter = 0
         for path in os.listdir(dir):
             file = os.path.join(dir, path)
             if os.path.isfile(file):
+                counter += 1
                 file = open(file, 'rb')
                 id, cls, page = path.split('_')
                 toClose.append((page, id, cls, file))
         toClose.sort()
+        if (counter != self.fileCount[cls]):
+            print("wrong file count for ID {}, cls {}, expected {}, got {}".format(id, cls, self.fileCount[cls], counter))
         for page, id, cls, file in toClose:
             pdfReader = PdfFileReader(file)
             pdfWriter.addPage(pdfReader.getPage(0))
@@ -275,12 +333,12 @@ class QRCodeScanner:
 
     def saveLogs(self):
         with open(self.save_filename, "w") as fw:
-            json.dump({"visited": self._visited}, fw)
+            json.dump({"visited": list(self._visited)}, fw)
 
     def loadLogs(self, filename):
         with open(filename, "w") as fw:
             json_dict = json.load(fw)
-            self._visited = json_dict["visited"]
+            self._visited = set(json_dict["visited"])
     
         
 if __name__ == "__main__":
