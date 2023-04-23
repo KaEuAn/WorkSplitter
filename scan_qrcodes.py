@@ -12,8 +12,8 @@ parser.add_argument('--output-path', '--output', '-o', type=str, default='output
                     help='destination path for the generated pdf-files')
 parser.add_argument('--input-path', '--input', '-i',  type=str, default=None,
                     help='path containing pdf files with scanned tasks. You can use blacklist folder as an input folder for ')
-parser.add_argument('--save-logs', '-s', type=str, default=None)
-parser.add_argument('--load-logs', '-l', type=str, default=None)
+parser.add_argument('--save-logs', '-s', type=bool, default=False)
+parser.add_argument('--load-logs', '-l', type=bool, default=False)
 parser.add_argument('--check-size', type=bool, default=False)
 parser.add_argument('--try-rotate', '-t', type=bool, default=False)
 parser.add_argument('--resolution', '-r', type=int, default=300)

@@ -16,7 +16,7 @@ parser.add_argument('--cls', '-c', type=str)
 parser.add_argument('--number', '-n', type=int, default=1)
 parser.add_argument('--start-student-id', '-s', type=int, default=1000)
 parser.add_argument('--start-file-id', type=int, default=1)
-parser.add_argument('--starting-page', type=int, default=200)
+parser.add_argument('--starting-page', type=int, default=None)
 parser.add_argument('--page-count', '-p', type=int, default=None)
 
 

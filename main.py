@@ -71,6 +71,7 @@ class PdfHeaderChanger:
         self.outputPdf = None
         self.QRMaker = QRCodeMaker()
         self.ds_print = double_sided_print
+        self.blankFileName = "input//blank.pdf"
         if desc_filename:
             with open(desc_filename, 'r') as desc_file:
                 self.docsByCls = json.load(desc_file)
@@ -108,10 +109,10 @@ class PdfHeaderChanger:
         filename = 'temp/title2merge{}_{}.pdf'.format(self.docs_count, self.page_count)
         newPdf = canvas.Canvas(filename)
         newPdf.setFont("Times-Roman", 12)
-        newPdf.drawString(206, 743,"{}".format(self.workID))
-        newPdf.drawString(321, 624,"{}".format(cls))
-        newPdf.drawString(206, 261,"{}".format(self.workID))
-        newPdf.drawString(321, 142,"{}".format(cls))
+        newPdf.drawString(236, 673,"{}".format(self.workID))
+        newPdf.drawString(381, 604,"{}".format(cls))
+        newPdf.drawString(236, 233,"{}".format(self.workID))
+        newPdf.drawString(381, 167,"{}".format(cls))
         newPdf.save()
         return filename
 
@@ -125,6 +126,10 @@ class PdfHeaderChanger:
         for i in range(1, len(pdfs)):
             curPage.mergePage(pdfs[i].getPage(pages[i]))
         self.outputPdf.addPage(curPage)
+        
+    def add_blank_page(self):
+        blank_page = self.openPdfReader(self.blankFileName)
+        self.outputPdf.addPage(blank_page.getPage(0))        
 
     def add_empty_QR_Id(self, cls, page_count, custom_page_number=None):
         self.QRMaker.cls = cls
@@ -138,7 +143,7 @@ class PdfHeaderChanger:
             if custom_page_number is not None:
                 custom_page_number += 1
         if self.ds_print and page_count % 2 == 1:
-            self.outputPdf.addBlankPage()
+            self.add_blank_page()
 
         self.workID += 1
         if self.page_count > self.max_count:
@@ -170,7 +175,7 @@ class PdfHeaderChanger:
                 self.mergeAddPages((taskPdf, qrcodePdf), (page_num, 0))
                 self.page_count += 1
             if self.ds_print and page_count % 2 == 1:
-                self.outputPdf.addBlankPage()
+                self.add_blank_page()
 
         self.workID += 1
         if self.page_count > self.max_count:
@@ -185,6 +190,10 @@ class PdfHeaderChanger:
             except OSError as e:
                 print("Error: %s - %s." % (e.filename, e.strerror))
 
+def getPageNumberFromFile(filename):
+    prefix = filename.split('.')[0]
+    page_number = prefix.split('_')[-1]
+    return int(page_number)
 
 
 class QRCodeScanner:
@@ -199,7 +208,7 @@ class QRCodeScanner:
         self._image_type = 'png'
         self._output_path = output_folder
         self._inter_output_path = "onelistpdfs"
-        self.fileCount = defaultdict(int, {"5": 18, "7": 17, "8": 23, "9": 23})
+        self.fileCount = defaultdict(int, {"5": 20, "7": 25, "8": 25, "9": 23})
         
         self.memoryTracker = SummaryTracker()
         
@@ -289,8 +298,9 @@ class QRCodeScanner:
             
         self._visited.add(pdf_filename)
         
-    def scanPdf(self, pdf_filename, resolution=300, **kwargs):
-        self.memoryTracker.print_diff()
+    def scanPdf(self, pdf_filename, resolution=300, track_memory=False, **kwargs):
+        if track_memory:
+            self.memoryTracker.print_diff()
         with (wandImage(filename=pdf_filename, resolution=resolution)) as source, open(pdf_filename, 'rb') as pdfStream:
             pdfReader = PdfFileReader(pdfStream)
             self.tryParse(source, pdf_filename, pdfReader, **kwargs)
@@ -301,7 +311,7 @@ class QRCodeScanner:
         for path in os.listdir(self._inter_output_path):
             dir = os.path.join(self._inter_output_path, path)
             if os.path.isdir(dir):
-                self.collectWorksFromPath(dir)
+                self.collectWorks(dir)
         if self.save_filename:
             self.saveLogs()
 
@@ -311,14 +321,21 @@ class QRCodeScanner:
         counter = 0
         for path in os.listdir(dir):
             file = os.path.join(dir, path)
+            min_amount = 9999999
+            max_amount = -1
             if os.path.isfile(file):
                 counter += 1
+                page_number = getPageNumberFromFile(file)
+                min_amount = min(min_amount, page_number)
+                max_amount = max(max_amount, page_number)
                 file = open(file, 'rb')
                 id, cls, page = path.split('_')
                 toClose.append((page, id, cls, file))
         toClose.sort()
         if (counter != self.fileCount[cls]):
             print("wrong file count for ID {}, cls {}, expected {}, got {}".format(id, cls, self.fileCount[cls], counter))
+        if (max_amount - min_amount + 1 != counter):
+            print("wrong file count for ID {}, cls {}, max_page_number {}, min_page_number {}, got {}".format(id, cls, self.fileCount[cls], max_amount, min_amount, counter)")
         for page, id, cls, file in toClose:
             pdfReader = PdfFileReader(file)
             pdfWriter.addPage(pdfReader.getPage(0))
@@ -342,14 +359,12 @@ class QRCodeScanner:
     
         
 if __name__ == "__main__":
-    '''pdf_ch = PdfHeaderChanger("cls_files.json")
-    pdf_ch.add_work("5")
+    pdf_ch = PdfHeaderChanger("cls_files.json")
+    for i in range(900):
+        pdf_ch.add_work("5")
     pdf_ch.finish()
-    pdf_ch.add_work("7")
-    pdf_ch.add_work("8")
-    pdf_ch.add_work("9")'''
-    scanner = QRCodeScanner()
+    '''scanner = QRCodeScanner()
     scanner.scanPdf("output/1.pdf")
     scanner.scanPdf("output/2.pdf")
     scanner.collectWorks()
-    scanner.printWorks()
+    scanner.printWorks()'''
