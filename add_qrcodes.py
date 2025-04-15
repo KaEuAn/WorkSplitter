@@ -17,11 +17,16 @@ parser.add_argument('--number', '-n', type=int, default=1)
 parser.add_argument('--start-student-id', '-s', type=int, default=1000)
 parser.add_argument('--start-file-id', type=int, default=1)
 parser.add_argument('--starting-page', type=int, default=None)
-parser.add_argument('--page-count', '-p', type=int, default=None)
+parser.add_argument('--page-count', '-p', type=int, default=None, help='deprecated')
+parser.add_argument('--key', '-k', type=str, default=None)
+parser.add_argument('--stop-class-dump', type=bool, default=False)
 
 
 
 args = parser.parse_args()
+
+if args.key is None:
+    args.key = args.cls
 
 if args.input_path is not None and args.starting_page is not None:
     raise RuntimeError('Conflicting arguments to the programm')
@@ -34,18 +39,20 @@ if not os.path.isdir(args.output_path):
     os.mkdir(args.output_path)
 
 if args.page_count:
-    phc = main.PdfHeaderChanger(None, output_path=args.output_path, startingStudentId=args.start_student_id, startingDocsId=args.start_file_id)
+    phc = main.PdfHeaderChanger('cls_files.json', output_path=args.output_path, startingStudentId=args.start_student_id, startingDocsId=args.start_file_id)
     for i in tqdm(range(args.number)):
         phc.add_empty_QR_Id(args.cls, args.page_count, custom_page_number=args.starting_page)
     phc.finish()
     exit()
 
-if args.input_path:
+if args.input_path and not args.stop_class_dump:
     if not os.path.isdir(args.input_path):
         raise RuntimeError('input folder does not exsist')
     class_dump.class_dump(input_path=args.input_path)
 
-phc = main.PdfHeaderChanger('cls_files.json', output_path=args.output_path, startingStudentId=args.start_student_id, startingDocsId=args.start_file_id)
+phc = main.PdfHeaderChanger('cls_files.json', output_path=args.output_path,
+                            startingStudentId=args.start_student_id, startingDocsId=args.start_file_id,
+                            )
 for i in tqdm(range(args.number)):
-    phc.add_work(args.cls)
+    phc.add_work(args.cls, args.key)
 phc.finish()

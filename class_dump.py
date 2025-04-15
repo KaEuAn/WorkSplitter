@@ -16,7 +16,9 @@ def class_dump(input_path='input', output_filename="cls_files.json", special_sor
     for f in pdf_files:
         #f[7] is the class number in the filename
         cls_number = f[7]
-        if '0' <= cls_number <= '9': 
+        if cls_number == '5' and 'test' in f:
+            clsDict['5_test'].append(join(input_path, f))
+        elif '0' <= cls_number <= '9': 
             clsDict[f[7]].append(join(input_path, f))
         else:
             clsDict['title'] = join(input_path, f)

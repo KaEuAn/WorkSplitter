@@ -39,6 +39,6 @@ if args.input_path:
     for path in tqdm(os.listdir(args.input_path)):
         file = os.path.join(args.input_path, path)
         if os.path.isfile(file):
-            if not args.check_size or os.path.getsize(file) > 3600:
+            if not args.check_size:
                 scanner.scanPdf(file, try_rotate=args.try_rotate, resolution=args.resolution, bad_processing=args.bad_processing)
 scanner.collectWorks()
